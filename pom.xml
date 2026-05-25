@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright (c) 2026 YOFC
+
+    This program and the accompanying materials are made
+    available under the terms of the Eclipse Public License 2.0
+    which is available at https://www.eclipse.org/legal/epl-2.0/
+
+    SPDX-License-Identifier: EPL-2.0
+
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        Standalone Docker image sibling — no parent.
+        Builds the kura-alpine Docker image by pulling kura-core.deb and
+        sibling .debs from ~/.m2 (produced by earlier build stages) and
+        installing them via dpkg -x inside the Dockerfile.
+
+        One-time setup:
+            mvn -f kura/target-platform/pom.xml install    # target-platform into ~/.m2
+            mvn -f kura/kura/pom.xml install               # kura-core.deb into ~/.m2
+            mvn -f kura-management-ui/distrib/pom.xml install  # sibling .debs
+            mvn -f kura-wires/distrib/pom.xml install
+            mvn -f kura-deployment/distrib/pom.xml install
+        Build:
+            mvn -f kura-docker/pom.xml clean install
+    -->
+
+    <groupId>org.eclipse.kura</groupId>
+    <artifactId>kura-docker</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>kura-docker</name>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Kura core version (produced by monorepo kura/kura/distrib/kura-core) -->
+        <kura.version>6.0.0-SNAPSHOT</kura.version>
+
+        <!-- Sibling versions -->
+        <management-ui.version>3.0.0-SNAPSHOT</management-ui.version>
+        <wires.version>3.0.0-SNAPSHOT</wires.version>
+        <deployment.version>2.0.0-SNAPSHOT</deployment.version>
+    </properties>
+
+    <build>
+        <plugins>
+            <!--
+                Stage .deb files from ~/.m2 into target/debs/ for the Docker
+                build context. Each .deb is renamed to a predictable filename
+                so the Dockerfile doesn't need to know SNAPSHOT versions.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <!-- Copy kura-core .deb -->
+                    <execution>
+                        <id>copy-kura-core-deb</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/debs</outputDirectory>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.eclipse.kura</groupId>
+                                    <artifactId>gateway</artifactId>
+                                    <version>${kura.version}</version>
+                                    <type>deb</type>
+                                    <destFileName>kura-core.deb</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+
+                    <!-- Copy sibling .debs -->
+                    <execution>
+                        <id>copy-sibling-debs</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/debs</outputDirectory>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.eclipse.kura</groupId>
+                                    <artifactId>kura-management-ui-distrib</artifactId>
+                                    <version>${management-ui.version}</version>
+                                    <type>deb</type>
+                                    <destFileName>kura-management-ui.deb</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.eclipse.kura</groupId>
+                                    <artifactId>kura-wires.distrib</artifactId>
+                                    <version>${wires.version}</version>
+                                    <type>deb</type>
+                                    <destFileName>kura-wires.deb</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.eclipse.kura</groupId>
+                                    <artifactId>kura-deployment.distrib</artifactId>
+                                    <version>${deployment.version}</version>
+                                    <type>deb</type>
+                                    <destFileName>kura-deployment.deb</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+
+                </executions>
+            </plugin>
+
+            <!--
+                Copy Dockerfile, bin/ scripts, and docker-setup.sh into
+                the Docker build context at target/.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-docker-context</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/src/main/resources</directory>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>copy-docker-setup</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}</directory>
+                                    <includes>
+                                        <include>docker-setup.sh</include>
+                                    </includes>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Build Docker image. Working directory is target/ which
+                contains the Docker build context:
+                    target/Dockerfile
+                    target/docker-setup.sh
+                    target/debs/*.deb
+                    target/bin/*
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>docker-build</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>docker</executable>
+                            <workingDirectory>${project.build.directory}</workingDirectory>
+                            <arguments>
+                                <argument>build</argument>
+                                <argument>-t</argument>
+                                <argument>kura-alpine:latest</argument>
+                                <argument>.</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Auto-activated by host CPU architecture -->
+        <profile>
+            <id>arch-aarch64</id>
+            <activation>
+                <os><arch>aarch64</arch></os>
+            </activation>
+            <properties>
+                <native.tag>aarch64</native.tag>
+                <kura.arch>aarch64</kura.arch>
+                <deb.arch>arm64</deb.arch>
+            </properties>
+        </profile>
+        <profile>
+            <id>arch-x86_64</id>
+            <activation>
+                <os><arch>amd64</arch></os>
+            </activation>
+            <properties>
+                <native.tag>x86_64</native.tag>
+                <kura.arch>x86_64</kura.arch>
+                <deb.arch>amd64</deb.arch>
+            </properties>
+        </profile>
+    </profiles>
+
+</project>
