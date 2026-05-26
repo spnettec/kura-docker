@@ -12,7 +12,6 @@ Unlike the previous monorepo approach (which assembled bundles individually via 
 |---------|--------|----------|
 | `kura-core.deb` | `org.eclipse.kura:gateway:6.0.0-SNAPSHOT:deb` | Core runtime, plugins, framework |
 | `kura-management-ui.deb` | `org.eclipse.kura:kura-management-ui-distrib:3.0.0-SNAPSHOT:deb` | Web UI (web2) + commons-csv + console favicons |
-| `kura-wires.deb` | `org.eclipse.kura:kura-wires.distrib:3.0.0-SNAPSHOT:deb` | Wires data flow orchestration |
 | `kura-deployment.deb` | `org.eclipse.kura:kura-deployment.distrib:2.0.0-SNAPSHOT:deb` | Deployment agent + REST packages |
 | yofc `.dp` files | `com.yofc.iot:yofc-iot-*:0.0.1-SNAPSHOT:dp` | Optional deployment packages (gated by `-Ddist.dp.skip=false`) |
 

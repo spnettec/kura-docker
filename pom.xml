@@ -26,7 +26,7 @@
             mvn -f kura/target-platform/pom.xml install    # target-platform into ~/.m2
             mvn -f kura/kura/pom.xml install               # kura-core.deb into ~/.m2
             mvn -f kura-management-ui/distrib/pom.xml install  # sibling .debs
-            mvn -f kura-wires/distrib/pom.xml install
+
             mvn -f kura-deployment/distrib/pom.xml install
         Build:
             mvn -f kura-docker/pom.xml clean install
@@ -46,7 +46,7 @@
 
         <!-- Sibling versions -->
         <management-ui.version>3.0.0-SNAPSHOT</management-ui.version>
-        <wires.version>3.0.0-SNAPSHOT</wires.version>
+
         <deployment.version>2.0.0-SNAPSHOT</deployment.version>
     </properties>
 
@@ -100,13 +100,7 @@
                                     <type>deb</type>
                                     <destFileName>kura-management-ui.deb</destFileName>
                                 </artifactItem>
-                                <artifactItem>
-                                    <groupId>org.eclipse.kura</groupId>
-                                    <artifactId>kura-wires.distrib</artifactId>
-                                    <version>${wires.version}</version>
-                                    <type>deb</type>
-                                    <destFileName>kura-wires.deb</destFileName>
-                                </artifactItem>
+
                                 <artifactItem>
                                     <groupId>org.eclipse.kura</groupId>
                                     <artifactId>kura-deployment.distrib</artifactId>

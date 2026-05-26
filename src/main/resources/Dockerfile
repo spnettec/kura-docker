@@ -24,7 +24,7 @@ RUN set -ex; \
     \
     # Extract kura-core .deb (no postinst — systemd not available)
     dpkg -x /tmp/debs/kura-core.deb / && \
-    for deb in kura-management-ui kura-wires kura-deployment; do \
+    for deb in kura-management-ui kura-deployment; do \
         dpkg -x /tmp/debs/${deb}.deb / ; \
     done && \
     \
@@ -43,7 +43,7 @@ RUN set -ex; \
     \
     # Register siblings
     echo "management-ui" >> ${KURA_DIR}/framework/sibling-install-order && \
-    echo "wires" >> ${KURA_DIR}/framework/sibling-install-order && \
+
     echo "deployment" >> ${KURA_DIR}/framework/sibling-install-order && \
     \
     # Configure fileinstall
