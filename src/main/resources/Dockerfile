@@ -1,10 +1,14 @@
+# check=skip=SecretsUsedInArgOrEnv
+
 # ============================================================
 # Stage 1: Builder — extract .debs and run Docker-specific setup
 # The 348MB of .deb files stay in this stage and are discarded.
+# KURA_CRYPTO_SECRET_KEY is set via ENV by design (overridable at
+# `docker run -e ...`); the SecretsUsedInArgOrEnv check is skipped above.
 # ============================================================
 FROM alpine:latest AS builder
 
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+# RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 # Copy ALL build context into builder (debs, scripts, configs)
 COPY debs/ /tmp/debs/
@@ -43,7 +47,6 @@ RUN set -ex; \
     \
     # Register siblings
     echo "management-ui" >> ${KURA_DIR}/framework/sibling-install-order && \
-
     echo "deployment" >> ${KURA_DIR}/framework/sibling-install-order && \
     \
     # Configure fileinstall
