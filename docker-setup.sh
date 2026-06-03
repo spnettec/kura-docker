@@ -47,6 +47,19 @@ fi
 
 # ── Generate HTTPS keystore ──
 # Kura's embedded Jetty needs this for the HTTPS management UI
+# Ensure UTF-8 locale is available, otherwise Chinese DN characters get corrupted.
+# Alpine: install musl-locales if missing; Debian/Ubuntu: use locale-gen.
+if ! locale -a 2>/dev/null | grep -qi 'en_US.utf8\|en_US.UTF-8'; then
+    if command -v apk > /dev/null 2>&1; then
+        apk add --no-cache musl-locales 2>/dev/null || true
+    elif command -v locale-gen > /dev/null 2>&1; then
+        locale-gen en_US.UTF-8 2>/dev/null || true
+    elif command -v localedef > /dev/null 2>&1; then
+        localedef -i en_US -f UTF-8 en_US.UTF-8 2>/dev/null || true
+    fi
+fi
+export LC_ALL=en_US.UTF-8
+
 keytool -genkey -alias localhost -keyalg RSA -keysize 2048 \
     -keystore ${INSTALL_DIR}/kura/user/security/httpskeystore.ks \
     -deststoretype pkcs12 \
