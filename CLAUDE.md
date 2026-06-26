@@ -58,3 +58,25 @@ docker run -d -p 443:443 --name kura kura-alpine:latest
 ```
 
 Access the management UI at `https://localhost:443` (default credentials: `admin` / `admin`).
+
+## Codebase Memory MCP — Code Intelligence
+
+This project is indexed by **codebase-memory-mcp**. Always use it BEFORE grep/find or reading files when you need to understand or locate code. The skill at `~/.claude/skills/codebase-memory/` contains the full decision matrix and workflow.
+
+### Quick Reference
+
+| Question | Tool |
+|----------|------|
+| Who calls X? | `trace_path(direction="inbound")` |
+| What does X call? | `trace_path(direction="outbound")` |
+| Find by name | `search_graph(name_pattern="...")` |
+| Dead code | `search_graph(max_degree=0)` |
+| Impact of changes | `detect_changes()` |
+| Architecture overview | `get_architecture(aspects=["all"])` |
+| Read source | `get_code_snippet(qualified_name="...")` |
+
+### Exploration Workflow
+
+`list_projects` → `get_graph_schema` → `search_graph` → `get_code_snippet`
+
+> If the repository hasn't been indexed yet, run: `codebase-memory-mcp cli index_repository '{"repo_path": "/path/to/repo"}'`
