@@ -48,6 +48,9 @@
         <management-ui.version>3.0.0-SNAPSHOT</management-ui.version>
 
         <deployment.version>2.0.0-SNAPSHOT</deployment.version>
+
+        <!-- Docker platform (overridable via -Ddocker.platform=linux/amd64) -->
+        <docker.platform>linux/arm64</docker.platform>
     </properties>
 
     <build>
@@ -186,6 +189,8 @@
                             <workingDirectory>${project.build.directory}</workingDirectory>
                             <arguments>
                                 <argument>build</argument>
+                                <argument>--platform</argument>
+                                <argument>${docker.platform}</argument>
                                 <argument>-t</argument>
                                 <argument>kura-alpine:latest</argument>
                                 <argument>.</argument>
@@ -208,6 +213,7 @@
                 <native.tag>aarch64</native.tag>
                 <kura.arch>aarch64</kura.arch>
                 <deb.arch>arm64</deb.arch>
+                <docker.platform>linux/arm64</docker.platform>
             </properties>
         </profile>
         <profile>
@@ -219,6 +225,7 @@
                 <native.tag>x86_64</native.tag>
                 <kura.arch>x86_64</kura.arch>
                 <deb.arch>amd64</deb.arch>
+                <docker.platform>linux/amd64</docker.platform>
             </properties>
         </profile>
     </profiles>
