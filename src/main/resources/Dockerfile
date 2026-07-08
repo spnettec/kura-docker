@@ -12,6 +12,7 @@ FROM alpine:latest AS builder
 
 # Copy ALL build context into builder (debs, scripts, configs)
 COPY debs/ /tmp/debs/
+COPY dps/ /tmp/dps/
 COPY bin/ /usr/local/bin/
 COPY docker-setup.sh /tmp/
 COPY log4j/log4j.xml /tmp/log4j.xml
@@ -28,7 +29,7 @@ RUN set -ex; \
     \
     # Extract kura-core .deb (no postinst — systemd not available)
     dpkg -x /tmp/debs/kura-core.deb / && \
-    for deb in kura-management-ui kura-deployment; do \
+    for deb in kura-management-ui kura-deployment kura-wires; do \
         dpkg -x /tmp/debs/${deb}.deb / ; \
     done && \
     \
@@ -48,13 +49,24 @@ RUN set -ex; \
     # Register siblings
     echo "management-ui" >> ${KURA_DIR}/framework/sibling-install-order && \
     echo "deployment" >> ${KURA_DIR}/framework/sibling-install-order && \
+    echo "wires" >> ${KURA_DIR}/framework/sibling-install-order && \
+    \
+    # Install YOFC .dp deployment packages
+    if [ -d /tmp/dps ]; then \
+        install -m 0777 -d ${KURA_DIR}/kura/packages && \
+        install -m 0777 -d ${KURA_DIR}/packages && \
+        for dp in /tmp/dps/*.dp; do \
+            cp "$dp" ${KURA_DIR}/kura/packages/ ; \
+            dp-register ${KURA_DIR}/kura/packages/$(basename "$dp") ; \
+        done ; \
+    fi && \
     \
     # Configure fileinstall
     add-config-ini "felix.fileinstall.disableNio2=true" && \
     add-config-ini "felix.fileinstall.dir=/load" && \
     \
     # Cleanup temp files
-    rm -rf /tmp/debs /tmp/docker-setup.sh /tmp/log4j.xml /tmp/snapshot_0.xml && \
+    rm -rf /tmp/debs /tmp/dps /tmp/docker-setup.sh /tmp/log4j.xml /tmp/snapshot_0.xml && \
     \
     # Permissions
     chmod -R go-rwx /opt/eclipse && \

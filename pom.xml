@@ -46,8 +46,12 @@
 
         <!-- Sibling versions -->
         <management-ui.version>3.0.0-SNAPSHOT</management-ui.version>
-
+        <wires.version>3.0.0-SNAPSHOT</wires.version>
         <deployment.version>2.0.0-SNAPSHOT</deployment.version>
+
+        <!-- YOFC .dp package versions -->
+        <yofc-iot.version>0.0.1-SNAPSHOT</yofc-iot.version>
+        <yofc-runtime.version>1.0.0-SNAPSHOT</yofc-runtime.version>
 
         <!-- Docker platform (overridable via -Ddocker.platform=linux/amd64) -->
         <docker.platform>linux/arm64</docker.platform>
@@ -106,6 +110,13 @@
 
                                 <artifactItem>
                                     <groupId>org.eclipse.kura</groupId>
+                                    <artifactId>kura-wires.distrib</artifactId>
+                                    <version>${wires.version}</version>
+                                    <type>deb</type>
+                                    <destFileName>kura-wires.deb</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.eclipse.kura</groupId>
                                     <artifactId>kura-deployment.distrib</artifactId>
                                     <version>${deployment.version}</version>
                                     <type>deb</type>
@@ -115,6 +126,76 @@
                         </configuration>
                     </execution>
 
+                </executions>
+            </plugin>
+
+            <!--
+                Copy YOFC .dp deployment packages from sibling project target dirs.
+                Fails the build if any .dp file is missing.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-yofc-dps</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <property name="dps.dir" value="${project.build.directory}/dps"/>
+                                <mkdir dir="${dps.dir}"/>
+
+                                <available file="${project.basedir}/../kura-yofc-runtime/dp/target/kura-yofc-runtime.dp_${yofc-runtime.version}.dp"
+                                    property="dp.runtime.exists"/>
+                                <fail unless="dp.runtime.exists"
+                                    message="Missing kura-yofc-runtime .dp: ${project.basedir}/../kura-yofc-runtime/dp/target/kura-yofc-runtime.dp_${yofc-runtime.version}.dp"/>
+                                <copy todir="${dps.dir}" failonerror="true">
+                                    <fileset dir="${project.basedir}/../kura-yofc-runtime/dp/target">
+                                        <include name="kura-yofc-runtime.dp_${yofc-runtime.version}.dp"/>
+                                    </fileset>
+                                </copy>
+
+                                <available file="${project.basedir}/../yofc-iot/com.yofc.iot.api/com.yofc.iot.api.comp/target/yofc-iot-api-comp_${yofc-iot.version}.dp"
+                                    property="dp.api.exists"/>
+                                <fail unless="dp.api.exists"
+                                    message="Missing yofc-iot-api-comp .dp: ${project.basedir}/../yofc-iot/com.yofc.iot.api/com.yofc.iot.api.comp/target/yofc-iot-api-comp_${yofc-iot.version}.dp"/>
+                                <copy todir="${dps.dir}" failonerror="true">
+                                    <fileset dir="${project.basedir}/../yofc-iot/com.yofc.iot.api/com.yofc.iot.api.comp/target">
+                                        <include name="yofc-iot-api-comp_${yofc-iot.version}.dp"/>
+                                    </fileset>
+                                </copy>
+
+                                <available file="${project.basedir}/../yofc-iot/com.yofc.iot.apps/com.yofc.iot.apps.comp/target/yofc-iot-apps-comp_${yofc-iot.version}.dp"
+                                    property="dp.apps.exists"/>
+                                <fail unless="dp.apps.exists"
+                                    message="Missing yofc-iot-apps-comp .dp: ${project.basedir}/../yofc-iot/com.yofc.iot.apps/com.yofc.iot.apps.comp/target/yofc-iot-apps-comp_${yofc-iot.version}.dp"/>
+                                <copy todir="${dps.dir}" failonerror="true">
+                                    <fileset dir="${project.basedir}/../yofc-iot/com.yofc.iot.apps/com.yofc.iot.apps.comp/target">
+                                        <include name="yofc-iot-apps-comp_${yofc-iot.version}.dp"/>
+                                    </fileset>
+                                </copy>
+
+                                <available file="${project.basedir}/../yofc-iot/com.yofc.iot.apps/com.yofc.iot.apps.opcuaserver/target/yofc-iot-apps-opcuaserver_${yofc-iot.version}.dp"
+                                    property="dp.opcuaserver.exists"/>
+                                <fail unless="dp.opcuaserver.exists"
+                                    message="Missing yofc-iot-apps-opcuaserver .dp: ${project.basedir}/../yofc-iot/com.yofc.iot.apps/com.yofc.iot.apps.opcuaserver/target/yofc-iot-apps-opcuaserver_${yofc-iot.version}.dp"/>
+                                <copy todir="${dps.dir}" failonerror="true">
+                                    <fileset dir="${project.basedir}/../yofc-iot/com.yofc.iot.apps/com.yofc.iot.apps.opcuaserver/target">
+                                        <include name="yofc-iot-apps-opcuaserver_${yofc-iot.version}.dp"/>
+                                    </fileset>
+                                </copy>
+
+                                <echo message="Copied YOFC .dp files:"/>
+                                <exec executable="ls" dir="${dps.dir}" failonerror="true">
+                                    <arg value="-la"/>
+                                </exec>
+                            </target>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
 
