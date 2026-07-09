@@ -65,8 +65,9 @@ RUN set -ex; \
     add-config-ini "felix.fileinstall.disableNio2=true" && \
     add-config-ini "felix.fileinstall.dir=/load" && \
     \
-    # Cleanup temp files
+    # Cleanup temp files + Docker-unneeded bundles (no USB/udev in container)
     rm -rf /tmp/debs /tmp/dps /tmp/docker-setup.sh /tmp/log4j.xml /tmp/snapshot_0.xml && \
+    rm -f ${KURA_DIR}/plugins/*/org.eclipse.kura.linux.usb*.jar && \
     \
     # Permissions
     chmod -R go-rwx /opt/eclipse && \

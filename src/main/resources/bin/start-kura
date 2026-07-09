@@ -25,6 +25,7 @@ JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.model.id=Docker"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.model.name=Docker"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.serialNumber=Docker"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.bios.version=Docker"
+JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.firmware.version=Docker"
 
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Declipse.ignoreApp=true"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Dosgi.console=9000"
