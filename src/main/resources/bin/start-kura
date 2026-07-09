@@ -19,6 +19,13 @@ JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.arch=intel-up2-centos-7"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Dtarget.device=intel-up2-nn"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.device.name=\"${KURA_DEVICE_NAME:-Kura Container Instance}\""
 
+# Docker has no DMI/BIOS table — override dmidecode values to avoid
+# ERROR o.e.k.c.s.SuperSystemService - failed to run commands dmidecode
+JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.model.id=Docker"
+JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.model.name=Docker"
+JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.serialNumber=Docker"
+JAVA_INT_OPTS="$JAVA_INT_OPTS -Dkura.bios.version=Docker"
+
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Declipse.ignoreApp=true"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Dosgi.console=9000"
 JAVA_INT_OPTS="$JAVA_INT_OPTS -Declipse.consoleLog=true"

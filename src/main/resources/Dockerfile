@@ -87,13 +87,15 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 ENV \
   KURA_DIR=/opt/eclipse/kura \
   LAUNCHER_VERSION="1.7.100" \
-  KURA_CRYPTO_SECRET_KEY="kura-dev-key-005"
+  KURA_CRYPTO_SECRET_KEY="kura-dev-key-005" \
+  TZ=Asia/Shanghai
 
 RUN set -ex; \
     apk update && \
     apk add --no-cache openjdk21-jre bash zip curl gcompat procps \
         unzip gzip tar dos2unix openssl net-tools which busybox-extras \
-        bluez bluez-deprecated chrony eudev glib psmisc socat shadow dpkg && \
+        bluez bluez-deprecated chrony eudev glib psmisc socat shadow dpkg \
+        tzdata && \
     \
     # Create kura users (must match builder stage UIDs for chown)
     useradd -M kura 2>/dev/null || true && \
