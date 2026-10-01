@@ -1,4 +1,4 @@
-# CLAUDE.md — kura-docker
+# AGENTS.md — kura-docker
 
 Docker image sibling for Eclipse Kura. Produces `kura-alpine:latest` by pulling `.deb` packages from `~/.m2` and installing them via `dpkg -x` inside an Alpine container.
 
