@@ -1,17 +1,12 @@
-# check=skip=SecretsUsedInArgOrEnv
-
 # ============================================================
 # Stage 1: Builder — extract .debs and run Docker-specific setup
-# The 348MB of .deb files stay in this stage and are discarded.
-# KURA_CRYPTO_SECRET_KEY is set via ENV by design (overridable at
-# `docker run -e ...`); the SecretsUsedInArgOrEnv check is skipped above.
+# Debian inputs are mounted read-only without a large COPY cache layer.
 # ============================================================
 FROM alpine:latest AS builder
 
 # RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 # Copy ALL build context into builder (debs, scripts, configs)
-COPY debs/ /tmp/debs/
 COPY dps/ /tmp/dps/
 COPY bin/ /usr/local/bin/
 COPY docker-setup.sh /tmp/
@@ -20,9 +15,9 @@ COPY snapshots/snapshot_0.xml /tmp/snapshot_0.xml
 
 ENV KURA_DIR=/opt/eclipse/kura
 
-RUN set -ex; \
+RUN --mount=type=bind,source=debs,target=/tmp/debs,readonly set -ex; \
     apk update && \
-    apk add --no-cache openjdk21-jre bash shadow dpkg openssl gcompat && \
+    apk add --no-cache openjdk21-jre bash shadow dpkg openssl gcompat python3 && \
     \
     chmod a+x -R /usr/local/bin && \
     ln -s /bin/bash /usr/bin/bash && \
@@ -38,7 +33,7 @@ RUN set -ex; \
     rm -rf /opt/eclipse/kura && \
     ln -snf /opt/eclipse/kura_* /opt/eclipse/kura && \
     \
-    # Docker-specific setup: users, dirs, keystore, snapshot
+    # Docker-specific setup: users, directories and initial snapshot
     chmod +x /tmp/docker-setup.sh && /tmp/docker-setup.sh && \
     \
     # Override log4j (Console appender for docker logs) and snapshot
@@ -56,6 +51,7 @@ RUN set -ex; \
         install -m 0777 -d ${KURA_DIR}/kura/packages && \
         install -m 0777 -d ${KURA_DIR}/packages && \
         for dp in /tmp/dps/*.dp; do \
+            [ -f "$dp" ] || continue; \
             cp "$dp" ${KURA_DIR}/kura/packages/ ; \
             dp-register ${KURA_DIR}/kura/packages/$(basename "$dp") ; \
         done ; \
@@ -66,7 +62,7 @@ RUN set -ex; \
     add-config-ini "felix.fileinstall.dir=/load" && \
     \
     # Cleanup temp files + Docker-unneeded bundles (no USB/udev in container)
-    rm -rf /tmp/debs /tmp/dps /tmp/docker-setup.sh /tmp/log4j.xml /tmp/snapshot_0.xml && \
+    rm -rf /tmp/dps /tmp/docker-setup.sh /tmp/log4j.xml /tmp/snapshot_0.xml && \
     rm -f ${KURA_DIR}/plugins/*/org.eclipse.kura.linux.usb*.jar && \
     \
     # Permissions
@@ -75,7 +71,8 @@ RUN set -ex; \
     find /opt/eclipse -type d | xargs chmod a+x && \
     install -m 0777 -d "${KURA_DIR}/data" && \
     mkdir -p ${KURA_DIR}/packages && \
-    sed -i "s/\-printf '\%P.n'//g" /usr/local/bin/dp-install
+    sed -i "s/\-printf '\%P.n'//g" /usr/local/bin/dp-install && \
+    python3 -I /usr/local/bin/kura-container-bootstrap.py inventory
 
 # ============================================================
 # Stage 2: Final — slim runtime image
@@ -87,16 +84,15 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 ENV \
   KURA_DIR=/opt/eclipse/kura \
-  LAUNCHER_VERSION="1.7.100" \
-  KURA_CRYPTO_SECRET_KEY="kura-dev-key-005" \
+  PERSISTENT_DIR=/var/lib/kura \
   TZ=Asia/Shanghai
 
 RUN set -ex; \
     apk update && \
     apk add --no-cache openjdk21-jre bash zip curl gcompat procps \
         unzip gzip tar dos2unix openssl net-tools which busybox-extras \
-        bluez bluez-deprecated chrony eudev glib psmisc socat shadow dpkg \
-        tzdata && \
+        chrony eudev glib psmisc socat shadow dpkg \
+        tzdata python3 py3-cryptography && \
     \
     # Create kura users (must match builder stage UIDs for chown)
     useradd -M kura 2>/dev/null || true && \
@@ -111,6 +107,7 @@ RUN set -ex; \
 # --chown avoids a separate chown layer (which would duplicate 357MB in overlay FS)
 COPY --from=builder --chown=kurad:kurad /opt/eclipse /opt/eclipse
 COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /usr/local/share/kura /usr/local/share/kura
 
 RUN set -ex; \
     chmod a+rx /usr/local/bin/* && \
@@ -119,6 +116,6 @@ RUN set -ex; \
 
 EXPOSE 80 443
 
-VOLUME ["/load"]
+VOLUME ["/load", "/var/lib/kura"]
 
 ENTRYPOINT ["/usr/local/bin/kura-entry-point"]
