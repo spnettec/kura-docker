@@ -95,7 +95,7 @@ RUN --mount=type=bind,source=.,target=/tmp/inputs,readonly set -eux; \
 # ============================================================
 FROM alpine:latest
 
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+ARG KURA_APK_MIRROR=mirrors.aliyun.com
 
 ENV \
   KURA_DIR=/opt/eclipse/kura \
@@ -103,6 +103,8 @@ ENV \
   TZ=Asia/Shanghai
 
 RUN set -eux; \
+    case "$KURA_APK_MIRROR" in ""|*[!a-zA-Z0-9.-]*) exit 1 ;; esac; \
+    sed -i "s|dl-cdn.alpinelinux.org|$KURA_APK_MIRROR|g" /etc/apk/repositories; \
     apk add --no-cache openjdk21-jre bash zip curl gcompat procps \
         unzip gzip tar dos2unix openssl net-tools which busybox-extras \
         chrony eudev glib psmisc socat shadow dpkg \

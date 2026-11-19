@@ -46,6 +46,7 @@
         <!-- Docker platform (overridable via -Ddocker.platform=linux/amd64) -->
         <docker.platform>linux/arm64</docker.platform>
         <docker.image>kura-alpine:latest</docker.image>
+        <docker.apk.mirror>mirrors.aliyun.com</docker.apk.mirror>
         <dist.dp.skip>false</dist.dp.skip>
     </properties>
     <build>
@@ -228,6 +229,8 @@
                                 <argument>${docker.platform}</argument>
                                 <argument>--build-arg</argument>
                                 <argument>KURA_SKIP_DPS=${dist.dp.skip}</argument>
+                                <argument>--build-arg</argument>
+                                <argument>KURA_APK_MIRROR=${docker.apk.mirror}</argument>
                                 <argument>-t</argument>
                                 <argument>${docker.image}</argument>
                                 <argument>.</argument>
