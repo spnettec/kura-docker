@@ -102,18 +102,13 @@ ENV \
   PERSISTENT_DIR=/var/lib/kura \
   TZ=Asia/Shanghai
 
-RUN set -ex; \
-    apk update && \
+RUN set -eux; \
     apk add --no-cache openjdk21-jre bash zip curl gcompat procps \
         unzip gzip tar dos2unix openssl net-tools which busybox-extras \
         chrony eudev glib psmisc socat shadow dpkg \
-        tzdata python3 py3-cryptography && \
-    \
-    # Create kura users (must match builder stage UIDs for chown)
-    useradd -M kura 2>/dev/null || true && \
-    passwd -l kura 2>/dev/null || true && \
-    useradd -r -M kurad 2>/dev/null || true && \
-    passwd -l kurad 2>/dev/null || true && \
+        tzdata python3 py3-cryptography; \
+    useradd -M kura; passwd -l kura; \
+    useradd -r -M kurad; passwd -l kurad; \
     \
     # sysconfig directory
     mkdir -p /etc/sysconfig

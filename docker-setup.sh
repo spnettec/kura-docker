@@ -14,10 +14,10 @@ echo "Running Docker-specific Kura setup..."
 
 # ── Create kura users ──
 # shadow package provides useradd/passwd on Alpine
-useradd -M kura 2>/dev/null || true
-passwd -l kura 2>/dev/null || true
-useradd -r -M kurad 2>/dev/null || true
-passwd -l kurad 2>/dev/null || true
+useradd -M kura
+passwd -l kura
+useradd -r -M kurad
+passwd -l kurad
 
 # ── Create required directories ──
 mkdir -p ${INSTALL_DIR}/kura/.data
