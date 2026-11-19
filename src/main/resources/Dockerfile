@@ -117,7 +117,8 @@ RUN set -eux; \
     groupadd -g 122 kurad; useradd -r -M -u 122 -g kurad kurad; passwd -l kurad; \
     \
     # sysconfig directory
-    mkdir -p /etc/sysconfig
+    mkdir -p /etc/sysconfig; \
+    install -d -m 0700 -o kurad -g kurad /var/log/kura
 
 # Copy installed files from builder (NO .deb files!)
 # Keep package ownership. The privileged bootstrap only loads paired Root code.

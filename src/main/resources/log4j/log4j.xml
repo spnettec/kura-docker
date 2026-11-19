@@ -16,7 +16,7 @@
 <Configuration status="warn" strict="true" name="KuraConfig" monitorInterval="30">
 
     <Properties>
-        <Property name="log_dir">/var/log</Property>
+        <Property name="log_dir">/var/log/kura</Property>
         <Property name="log_name">kura</Property>
     </Properties>
     <Filter type="ThresholdFilter" level="trace"/>
