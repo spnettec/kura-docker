@@ -71,6 +71,16 @@ class ContainerCredentials(unittest.TestCase):
     def prepare(self, env=None):
         return self.bootstrap(env).prepare(self.keytool)
 
+    def test_container_loads_only_the_policy_paired_to_the_installed_package(self):
+        source = b'PAIRED_POLICY_EXAMPLE = True\n'
+        relative = "bin/kura_key_store.py"
+        paired = json.dumps({"files": {relative: hashlib.sha256(source).hexdigest()}}).encode()
+        with patch.object(B, "image_asset", side_effect=[paired, source]):
+            self.assertTrue(B.load_policy(self.home).PAIRED_POLICY_EXAMPLE)
+        with patch.object(B, "image_asset", side_effect=[paired, b'raise AssertionError("unpaired file was run")']):
+            with self.assertRaisesRegex(RuntimeError, "differs from the Core package"):
+                B.load_policy(self.home)
+
     def key(self):
         return (self.volume / P.KEY_PATH.lstrip('/')).read_bytes()
 

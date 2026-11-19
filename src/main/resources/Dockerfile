@@ -7,71 +7,86 @@ FROM alpine:latest AS builder
 # RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 # Copy ALL build context into builder (debs, scripts, configs)
-COPY dps/ /tmp/dps/
 COPY bin/ /usr/local/bin/
 COPY docker-setup.sh /tmp/
 COPY log4j/log4j.xml /tmp/log4j.xml
 COPY snapshots/snapshot_0.xml /tmp/snapshot_0.xml
 
 ENV KURA_DIR=/opt/eclipse/kura
+ARG TARGETARCH
+ARG KURA_SKIP_DPS=false
 
-RUN --mount=type=bind,source=debs,target=/tmp/debs,readonly set -ex; \
-    apk update && \
-    apk add --no-cache openjdk21-jre bash shadow dpkg openssl gcompat python3 && \
+RUN --mount=type=bind,source=.,target=/tmp/inputs,readonly set -eux; \
+    apk add --no-cache openjdk21-jre bash shadow dpkg openssl gcompat python3; \
     \
-    chmod a+x -R /usr/local/bin && \
-    ln -s /bin/bash /usr/bin/bash && \
+    chmod a+x -R /usr/local/bin; \
+    ln -s /bin/bash /usr/bin/bash; \
     \
-    # Extract kura-core .deb (no postinst — systemd not available)
-    dpkg -x /tmp/debs/kura-core.deb / && \
-    for deb in kura-management-ui kura-deployment kura-wires; do \
-        dpkg -x /tmp/debs/${deb}.deb / ; \
-    done && \
+    # The Debian inputs must match their package names and target ABI.
+    case "$TARGETARCH" in arm64|amd64) ;; *) exit 1 ;; esac; \
+    mkdir -p /usr/local/share/kura; \
+    for name in kura-core kura-management-ui kura-deployment kura-wires; do \
+        deb="/tmp/inputs/debs/$name.deb"; \
+        test "$(dpkg-deb -f "$deb" Package)" = "$name"; \
+        architecture="$(dpkg-deb -f "$deb" Architecture)"; \
+        if [ "$name" = kura-core ]; then \
+            test "$architecture" = "$TARGETARCH"; \
+        else \
+            test "$architecture" = all || test "$architecture" = "$TARGETARCH"; \
+        fi; \
+        printf '%s\t%s\t%s\t%s\n' "$name" "$(dpkg-deb -f "$deb" Version)" "$architecture" \
+            "$(sha256sum "$deb" | cut -d ' ' -f 1)" >> /usr/local/share/kura/package-inputs.tsv; \
+        dpkg-deb -x "$deb" /; \
+    done; \
     \
     # Consolidate: move sibling files into versioned dir, then symlink
-    cp -a /opt/eclipse/kura/* /opt/eclipse/kura_*/ 2>/dev/null || true && \
-    rm -rf /opt/eclipse/kura && \
-    ln -snf /opt/eclipse/kura_* /opt/eclipse/kura && \
+    set -- /opt/eclipse/kura_*_linux; \
+    test "$#" = 1; test -d "$1"; test ! -L "$1"; \
+    test -d "$KURA_DIR"; test ! -L "$KURA_DIR"; \
+    cp -a "$KURA_DIR/." "$1/"; \
+    rm -rf "$KURA_DIR"; \
+    ln -s "$1" "$KURA_DIR"; \
     \
     # Docker-specific setup: users, directories and initial snapshot
-    chmod +x /tmp/docker-setup.sh && /tmp/docker-setup.sh && \
+    chmod +x /tmp/docker-setup.sh; /tmp/docker-setup.sh; \
     \
     # Override log4j (Console appender for docker logs) and snapshot
-    cp /tmp/log4j.xml ${KURA_DIR}/log4j/log4j.xml && \
-    cp /tmp/snapshot_0.xml ${KURA_DIR}/user/snapshots/snapshot_0.xml && \
-    cp /tmp/snapshot_0.xml ${KURA_DIR}/.data/snapshot_0.xml && \
+    cp /tmp/log4j.xml "${KURA_DIR}/log4j/log4j.xml"; \
+    cp /tmp/snapshot_0.xml "${KURA_DIR}/user/snapshots/snapshot_0.xml"; \
+    cp /tmp/snapshot_0.xml "${KURA_DIR}/.data/snapshot_0.xml"; \
     \
     # Register siblings
-    echo "management-ui" >> ${KURA_DIR}/framework/sibling-install-order && \
-    echo "deployment" >> ${KURA_DIR}/framework/sibling-install-order && \
-    echo "wires" >> ${KURA_DIR}/framework/sibling-install-order && \
+    printf '%s\n' management-ui deployment wires >> "${KURA_DIR}/framework/sibling-install-order"; \
     \
     # Install YOFC .dp deployment packages
-    if [ -d /tmp/dps ]; then \
-        install -m 0777 -d ${KURA_DIR}/kura/packages && \
-        install -m 0777 -d ${KURA_DIR}/packages && \
-        for dp in /tmp/dps/*.dp; do \
-            [ -f "$dp" ] || continue; \
-            cp "$dp" ${KURA_DIR}/kura/packages/ ; \
-            dp-register ${KURA_DIR}/kura/packages/$(basename "$dp") ; \
-        done ; \
-    fi && \
+    case "$KURA_SKIP_DPS" in \
+        true) ;; \
+        false) \
+            set -- /tmp/inputs/dps/*.dp; \
+            test -f "$1"; \
+            install -m 0777 -d "${KURA_DIR}/kura/packages" "${KURA_DIR}/packages"; \
+            for dp; do \
+                cp "$dp" "${KURA_DIR}/kura/packages/"; \
+                dp-register "${KURA_DIR}/kura/packages/$(basename "$dp")"; \
+            done ;; \
+        *) exit 1 ;; \
+    esac; \
     \
     # Configure fileinstall
-    add-config-ini "felix.fileinstall.disableNio2=true" && \
-    add-config-ini "felix.fileinstall.dir=/load" && \
+    add-config-ini "felix.fileinstall.disableNio2=true"; \
+    add-config-ini "felix.fileinstall.dir=/load"; \
     \
     # Cleanup temp files + Docker-unneeded bundles (no USB/udev in container)
-    rm -rf /tmp/dps /tmp/docker-setup.sh /tmp/log4j.xml /tmp/snapshot_0.xml && \
-    rm -f ${KURA_DIR}/plugins/*/org.eclipse.kura.linux.usb*.jar && \
+    rm -f /tmp/docker-setup.sh /tmp/log4j.xml /tmp/snapshot_0.xml; \
+    rm -f "${KURA_DIR}"/plugins/*/org.eclipse.kura.linux.usb*.jar; \
     \
     # Permissions
-    chmod -R go-rwx /opt/eclipse && \
-    chmod a+rx /opt/eclipse && \
-    find /opt/eclipse -type d | xargs chmod a+x && \
-    install -m 0777 -d "${KURA_DIR}/data" && \
-    mkdir -p ${KURA_DIR}/packages && \
-    sed -i "s/\-printf '\%P.n'//g" /usr/local/bin/dp-install && \
+    chmod -R go-rwx /opt/eclipse; \
+    chmod a+rx /opt/eclipse; \
+    find /opt/eclipse -type d -exec chmod a+x {} +; \
+    install -m 0700 -d "${KURA_DIR}/data"; \
+    mkdir -p "${KURA_DIR}/packages"; \
+    sed -i "s/\-printf '\%P.n'//g" /usr/local/bin/dp-install; \
     python3 -I /usr/local/bin/kura-container-bootstrap.py inventory
 
 # ============================================================
@@ -104,8 +119,8 @@ RUN set -ex; \
     mkdir -p /etc/sysconfig
 
 # Copy installed files from builder (NO .deb files!)
-# --chown avoids a separate chown layer (which would duplicate 357MB in overlay FS)
-COPY --from=builder --chown=kurad:kurad /opt/eclipse /opt/eclipse
+# Keep package ownership. The privileged bootstrap only loads paired Root code.
+COPY --from=builder /opt/eclipse /opt/eclipse
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /usr/local/share/kura /usr/local/share/kura
 

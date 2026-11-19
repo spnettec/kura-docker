@@ -48,7 +48,4 @@ fi
 
 # HTTPS private keystores are generated at first runtime and retained in the volume.
 
-# ── Set ownership ──
-chown -R kurad:kurad /opt/eclipse 2>/dev/null || true
-
 echo "Docker setup complete."

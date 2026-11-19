@@ -45,6 +45,8 @@
         <yofc-runtime.version>1.0.0-SNAPSHOT</yofc-runtime.version>
         <!-- Docker platform (overridable via -Ddocker.platform=linux/amd64) -->
         <docker.platform>linux/arm64</docker.platform>
+        <docker.image>kura-alpine:latest</docker.image>
+        <dist.dp.skip>false</dist.dp.skip>
     </properties>
     <build>
         <plugins>
@@ -120,6 +122,7 @@
                             <goal>copy</goal>
                         </goals>
                         <configuration>
+                            <skip>${dist.dp.skip}</skip>
                             <outputDirectory>${project.build.directory}/dps</outputDirectory>
                             <artifactItems>
                                 <artifactItem>
@@ -223,8 +226,10 @@
                                 <argument>build</argument>
                                 <argument>--platform</argument>
                                 <argument>${docker.platform}</argument>
+                                <argument>--build-arg</argument>
+                                <argument>KURA_SKIP_DPS=${dist.dp.skip}</argument>
                                 <argument>-t</argument>
-                                <argument>kura-alpine:latest</argument>
+                                <argument>${docker.image}</argument>
                                 <argument>.</argument>
                             </arguments>
                         </configuration>

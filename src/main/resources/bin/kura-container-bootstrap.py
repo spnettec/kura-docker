@@ -5,7 +5,6 @@ import base64
 import contextlib
 import errno
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
 import xml.etree.ElementTree as ET
 
 FACTORY = Path("/usr/local/share/kura/image-state.json")
@@ -25,10 +25,38 @@ TLS_NAME = "user/security/httpskeystore.ks"
 MAX_STATE_BYTES = 16 * 1024 * 1024
 
 
+def image_asset(path, maximum=1024 * 1024):
+    for parent in reversed(path.parents):
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise RuntimeError("Unsafe container package directory")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1
+                or info.st_mode & 0o022 or not 0 < info.st_size <= maximum):
+            raise RuntimeError("Unsafe container package file")
+        raw = stream.read(maximum + 1)
+        current = path.lstat()
+        if len(raw) != info.st_size or (current.st_dev, current.st_ino, current.st_ctime_ns) != (
+                info.st_dev, info.st_ino, info.st_ctime_ns):
+            raise RuntimeError("Container package file changed")
+    return raw
+
+
 def load_policy(home):
-    spec = importlib.util.spec_from_file_location("kura_container_key_policy", home / "bin/kura_key_store.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    if home.is_symlink() and home.lstat().st_uid != 0:
+        raise RuntimeError("Unsafe container Core alias")
+    physical = home.resolve(strict=True)
+    descriptor = json.loads(image_asset(physical / "libexec/key-backup/manifest.json"))
+    relative = "bin/kura_key_store.py"
+    path = physical / relative
+    source = image_asset(path)
+    if hashlib.sha256(source).hexdigest() != descriptor["files"][relative]:
+        raise RuntimeError("Container key policy differs from the Core package")
+    module = types.ModuleType("kura_container_key_policy")
+    module.__file__ = str(path)
+    exec(compile(source, str(path), "exec"), module.__dict__)
     return module
 
 
