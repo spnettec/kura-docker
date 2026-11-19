@@ -334,7 +334,8 @@ class Bootstrap:
         entries = self.runtime_state_entries(roots)
         if stat.S_IMODE(self.root.lstat().st_mode) != 0o711:
             self.root.chmod(0o711)
-        for path, expected in reversed(entries):
+        # Copy-up of a lower-layer child can change its parent's metadata on OverlayFS.
+        for path, expected in entries:
             if (expected.st_uid, expected.st_gid) == (uid, gid):
                 continue
             flags = os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK

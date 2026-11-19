@@ -114,7 +114,7 @@ RUN set -eux; \
         chrony eudev glib psmisc socat shadow dpkg \
         tzdata python3 py3-cryptography setpriv; \
     useradd -M kura; passwd -l kura; \
-    useradd -r -M kurad; passwd -l kurad; \
+    groupadd -g 122 kurad; useradd -r -M -u 122 -g kurad kurad; passwd -l kurad; \
     \
     # sysconfig directory
     mkdir -p /etc/sysconfig
