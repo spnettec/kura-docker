@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import secrets
 import shlex
@@ -23,6 +24,9 @@ FACTORY = Path("/usr/local/share/kura/image-state.json")
 OPTION_NAMES = ("JAVA_OPTS", "JAVA_INT_OPTS", "JDK_JAVA_OPTIONS", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS")
 TLS_NAME = "user/security/httpskeystore.ks"
 MAX_STATE_BYTES = 16 * 1024 * 1024
+STATE_DIRECTORIES = ("user", "data", "packages")
+RUNTIME = Path("/run/kura-container")
+ROOT_TOOL_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
 
 
 def image_asset(path, maximum=1024 * 1024):
@@ -60,12 +64,31 @@ def load_policy(home):
     return module
 
 
+@contextlib.contextmanager
+def staged_file(directory):
+    fd, name = tempfile.mkstemp(prefix=".kura-stage-", dir=directory)
+    stage = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            yield stage, output
+    finally:
+        stage.unlink(missing_ok=True)
+
+
+def sync_directory(directory):
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def inventory(home, output=FACTORY):
     # A server private key must never be copied into an image layer.
     if (home / TLS_NAME).exists():
         raise RuntimeError("Server private keystore cannot be included in the image")
     files = {}
-    for name in ("user", "data", "packages"):
+    for name in STATE_DIRECTORIES:
         for path in sorted((home / name).rglob("*")):
             if path.is_symlink():
                 raise RuntimeError("Factory state must not contain symlinks")
@@ -123,13 +146,14 @@ def properties_values(raw):
 
 
 class Bootstrap:
-    def __init__(self, home, persistent, environ=None, factory=None, policy=None):
+    def __init__(self, home, persistent, environ=None, factory=None, policy=None, runtime_identity=None):
         self.home = Path(home).absolute()
         self.root = Path(persistent).absolute()
         self.env = dict(os.environ if environ is None else environ)
         self.policy = policy or load_policy(self.home)
         self.store = self.policy.Store(self.root)
-        self.factory = factory if factory is not None else json.loads(FACTORY.read_text())["files"]
+        self.factory = factory if factory is not None else json.loads(image_asset(FACTORY))["files"]
+        self.runtime_identity = runtime_identity
         self.marker = self.store.path("/etc/kura/credentials/container-bootstrap.json")
         self.sanitized = {}
 
@@ -143,7 +167,7 @@ class Bootstrap:
     def state_files(self):
         result = {}
         for origin in (self.home, self.root):
-            for name in ("user", "data", "packages"):
+            for name in STATE_DIRECTORIES:
                 directory = origin / name
                 if directory.is_symlink():
                     self.require(origin == self.home and directory.resolve() == (self.root / name).resolve(),
@@ -236,15 +260,15 @@ class Bootstrap:
         return matches[0]
 
     def merge_and_alias(self, files):
-        for name in ("user", "data", "packages"):
-            self.store.private_dir(self.root / name)
+        for name in STATE_DIRECTORIES:
+            self.mutable_directory(self.root / name)
         for relative, (_, data, _) in files.items():
             target = self.root / relative
             self.require(not target.exists() or self.read_data(target) == data,
                          "Persistent state requires explicit collision reconciliation")
             if not target.exists():
-                self.store.publish(target, data, 0o600)
-        for name in ("user", "data", "packages"):
+                self.publish_state(target, data)
+        for name in STATE_DIRECTORIES:
             source, target = self.home / name, self.root / name
             if source.is_symlink():
                 self.require(source.resolve() == target.resolve(), "Container alias changed")
@@ -256,6 +280,76 @@ class Bootstrap:
                     self.store.observed = {path: row for path, row in self.store.observed.items()
                                            if source not in path.parents}
                 source.symlink_to(target, target_is_directory=True)
+
+    def mutable_directory(self, path):
+        if not os.path.lexists(path):
+            path.mkdir(mode=0o700)
+        info = path.lstat()
+        owners = {self.store.owner}
+        if self.runtime_identity is not None:
+            owners.add(self.runtime_identity[0])
+        self.require(stat.S_ISDIR(info.st_mode) and info.st_uid in owners and not info.st_mode & 0o022,
+                     "Unsafe mutable container directory")
+
+    def publish_state(self, target, value):
+        parents = target.parent.relative_to(self.root).parts
+        self.require(parents and parents[0] in STATE_DIRECTORIES, "Invalid mutable container path")
+        directory = self.root
+        for part in parents:
+            directory = directory / part
+            self.mutable_directory(directory)
+        # Use the paired publisher for Root-owned paths. The runtime may already own
+        # a destination directory after a previous boot of this same container.
+        if target.parent.stat().st_uid == self.store.owner:
+            self.store.publish(target, value, 0o600)
+            return
+        with staged_file(target.parent) as (stage, output):
+            output.write(value)
+            output.flush()
+            os.fsync(output.fileno())
+            os.link(stage, target, follow_symlinks=False)
+        sync_directory(target.parent)
+
+    def runtime_state_entries(self, directories):
+        uid = self.runtime_identity[0]
+        entries = []
+        for directory in directories:
+            if not os.path.lexists(directory):
+                continue
+            self.mutable_directory(directory)
+            for path in (directory, *sorted(directory.rglob("*"))):
+                info = path.lstat()
+                self.require(info.st_uid in (self.store.owner, uid) and not info.st_mode & 0o022
+                             and not info.st_mode & (stat.S_ISUID | stat.S_ISGID)
+                             and (stat.S_ISDIR(info.st_mode)
+                                  or stat.S_ISREG(info.st_mode) and info.st_nlink == 1),
+                             "Mutable container state has an unreviewed type, mode or owner")
+                entries.append((path, info))
+        return entries
+
+    def adopt_runtime_state(self):
+        uid, gid = self.runtime_identity
+        self.store.private_dir(self.root)
+        roots = [self.root / name for name in STATE_DIRECTORIES] + [self.home / "log", self.home / ".data"]
+        entries = self.runtime_state_entries(roots)
+        if stat.S_IMODE(self.root.lstat().st_mode) != 0o711:
+            self.root.chmod(0o711)
+        for path, expected in reversed(entries):
+            if (expected.st_uid, expected.st_gid) == (uid, gid):
+                continue
+            flags = os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+            if stat.S_ISDIR(expected.st_mode):
+                flags |= os.O_DIRECTORY
+            fd = os.open(path, os.O_RDONLY | flags)
+            try:
+                observed = os.fstat(fd)
+                self.require((observed.st_dev, observed.st_ino, observed.st_ctime_ns)
+                             == (expected.st_dev, expected.st_ino, expected.st_ctime_ns),
+                             "Mutable container state changed before ownership handoff")
+                os.fchown(fd, uid, gid)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
 
     def archive_directory(self, source, backup):
         try:
@@ -378,14 +472,13 @@ class Bootstrap:
                 self.store.private_dir(tls.parent)
                 with tempfile.TemporaryDirectory(prefix=".tls-", dir=tls.parent) as temporary:
                     generated = Path(temporary) / "httpskeystore.ks"
-                    command = ["keytool", "-J-Dfile.encoding=UTF-8", "-genkeypair", "-alias", "localhost",
+                    command = ["/usr/bin/keytool", "-J-Dfile.encoding=UTF-8", "-genkeypair", "-alias", "localhost",
                                "-keyalg", "RSA", "-keysize", "2048", "-storetype", "PKCS12",
                                "-keystore", str(generated), "-dname",
                                "CN=YOFC, OU=信息技术部, O=长飞光纤光缆股份有限公司, L=武汉, S=湖北, C=中国",
                                "-ext", "ku=digitalSignature,keyEncipherment", "-ext", "eku=serverAuth",
                                "-validity", "1000", "-storepass", "changeit", "-keypass", "changeit"]
-                    result = keytool(command, capture_output=True,
-                                     env=dict(os.environ, LANG="C.UTF-8", LC_ALL="C.UTF-8"))
+                    result = keytool(command, capture_output=True, env=ROOT_TOOL_ENV)
                     self.require(result.returncode == 0, "Container HTTPS keystore generation failed")
                     self.store.publish(tls, generated.read_bytes(), 0o600)
             if marker is None:
@@ -396,28 +489,55 @@ class Bootstrap:
 
     def run(self, arguments):
         with self.instance_locked() as fd:
+            port_start = Path("/proc/sys/net/ipv4/ip_unprivileged_port_start")
+            self.require(int(port_start.read_text()) <= 80, "Container requires unprivileged ports including HTTP")
+            self.runtime_state_entries(self.root / name for name in STATE_DIRECTORIES)
             result = self.prepare_locked()
+            self.adopt_runtime_state()
             os.set_inheritable(fd, True)
             self.exec_runtime(result, arguments)
 
+    def setup_runtime(self, canonical):
+        uid, gid = self.runtime_identity
+        self.store.private_dir(RUNTIME)
+        RUNTIME.chmod(0o711)
+        credentials = RUNTIME / "credentials"
+        self.store.private_dir(credentials)
+        credentials.chmod(0o711)
+        with staged_file(RUNTIME) as (stage, output):
+            output.write(self.store.key(canonical / self.policy.CREDENTIAL))
+            output.flush()
+            os.fchown(output.fileno(), uid, gid)
+            os.fchmod(output.fileno(), 0o400)
+            stage.replace(credentials / self.policy.CREDENTIAL)
+        configuration = RUNTIME / "configuration"
+        self.mutable_directory(configuration)
+        with staged_file(RUNTIME) as (stage, output):
+            subprocess.run([str(self.home / "bin/gen_config_ini.sh"), str(self.home / "framework/config.ini"),
+                            str(self.home / "plugins"), str(self.home / "siblings")],
+                           stdout=output, env=ROOT_TOOL_ENV, check=True)
+            os.fchown(output.fileno(), uid, gid)
+            stage.replace(configuration / "config.ini")
+        os.chown(configuration, uid, gid, follow_symlinks=False)
+        return credentials, configuration
+
     def exec_runtime(self, result, arguments):
-        environment = dict(self.env, CREDENTIALS_DIRECTORY=result["credentialDirectory"],
+        credentials, configuration = self.setup_runtime(Path(result["credentialDirectory"]))
+        environment = dict(self.env, CREDENTIALS_DIRECTORY=str(credentials),
                            PERSISTENT_DIR=str(self.root), KURA_DIR=str(self.home))
         environment.pop("KURA_CRYPTO_SECRET_KEY", None)
         environment.update(self.sanitized)
-        subprocess.run(["python3", "-I", str(self.home / "bin/kura_key_store.py"), "check-loaded"],
-                       env=environment, check=True)
-        configuration = Path("/run/kura-container/configuration")
-        self.store.private_dir(configuration)
-        with (configuration / "config.ini").open("wb") as output:
-            subprocess.run([str(self.home / "bin/gen_config_ini.sh"), str(self.home / "framework/config.ini"),
-                            str(self.home / "plugins"), str(self.home / "siblings")], stdout=output, check=True)
+        uid, gid = self.runtime_identity
+        identity = ["/bin/setpriv", "--no-new-privs", "--bounding-set=-all", "--inh-caps=-all",
+                    "--ambient-caps=-all", "--regid=" + str(gid), "--reuid=" + str(uid), "--clear-groups"]
+        subprocess.run([*identity, "/usr/bin/python3", "-I", "-B", str(self.home / "bin/kura_key_store.py"),
+                        "check-loaded"], env=ROOT_TOOL_ENV | {"CREDENTIALS_DIRECTORY": str(credentials)}, check=True)
         launchers = list((self.home / "plugins").rglob("org.eclipse.equinox.launcher-*.jar"))
         self.require(len(launchers) == 1, "Container requires one Equinox launcher")
         options = shlex.split(self.sanitized.get("JAVA_OPTS", "")) + shlex.split(self.sanitized.get("JAVA_INT_OPTS", ""))
         options += ["-XX:+IgnoreUnrecognizedVMOptions", "--add-opens", "java.base/java.lang=ALL-UNNAMED",
                     "--add-opens", "java.base/java.util=ALL-UNNAMED", "--add-modules=ALL-SYSTEM",
-                    "-Declipse.ignoreApp=true", "-Declipse.consoleLog=true", "-Dosgi.console=9000",
+                    "-Declipse.ignoreApp=true", "-Declipse.consoleLog=true",
                     "-Dkura.os.version=centos", "-Dkura.arch=intel-up2-centos-7", "-Dtarget.device=intel-up2-nn",
                     "-Dkura.model.id=Docker", "-Dkura.model.name=Docker", "-Dkura.serialNumber=Docker",
                     "-Dkura.bios.version=Docker", "-Dkura.firmware.version=Docker",
@@ -429,19 +549,24 @@ class Bootstrap:
                     "-Dkura.configuration=file:" + str(self.home / "framework/kura.properties"),
                     "-Dkura.custom.configuration=file:" + self.env.get("KURA_CUSTOM_PROPERTIES_FILE", str(self.home / "user/kura_custom.properties")),
                     "-Dlog4j.configurationFile=file:" + self.env.get("KURA_LOG4J_FILE", str(self.home / "log4j/log4j.xml"))]
-        os.execvpe("/usr/bin/java", ["/usr/bin/java", *options, "-jar", str(launchers[0]),
-                    "-configuration", str(configuration), *arguments], environment)
+        os.execve(identity[0], [*identity, "/usr/bin/java", *options, "-jar", str(launchers[0]),
+                   "-configuration", str(configuration), *arguments], environment)
 
 
 def main(arguments):
     try:
+        os.umask(0o077)
         home = Path(os.environ.get("KURA_DIR", "/opt/eclipse/kura"))
         if arguments == ["inventory"]:
             inventory(home)
             return 0
         if not arguments or arguments[0] not in ("prepare", "run") or os.geteuid() != 0:
             raise RuntimeError("Unsupported container bootstrap invocation")
-        bootstrap = Bootstrap(home, Path(os.environ.get("PERSISTENT_DIR") or "/var/lib/kura"))
+        runtime = pwd.getpwnam("kurad")
+        if min(runtime.pw_uid, runtime.pw_gid) <= 0:
+            raise RuntimeError("Unsafe container runtime identity")
+        bootstrap = Bootstrap(home, Path(os.environ.get("PERSISTENT_DIR") or "/var/lib/kura"),
+                              runtime_identity=(runtime.pw_uid, runtime.pw_gid))
         if arguments[0] == "prepare":
             bootstrap.prepare()
             print("Kura container credentials and persistent state are ready.")

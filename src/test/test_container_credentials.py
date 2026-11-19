@@ -289,18 +289,45 @@ class ContainerCredentials(unittest.TestCase):
 
     def test_runtime_argv_uses_private_credentials_and_original_custom_config_path(self):
         boot = self.bootstrap({'JAVA_OPTS': '-Xmx256m -D' + P.PROPERTY + '=test-key-1234567', 'KURA_DEVICE_NAME': 'Test Device'})
+        boot.runtime_identity = (122, 122)
         boot.explicit_key()
         write(self.home / 'plugins/org.eclipse.equinox.launcher-1.7.100.jar', b'launcher-test')
-        with patch.object(boot.store, 'private_dir'), patch.object(Path, 'open', unittest.mock.mock_open()), patch.object(B.subprocess, 'run'), patch.object(B.os, 'execvpe') as execute:
+        runtime = self.base / 'run'
+        credentials = runtime / 'credentials'
+        with patch.object(boot, 'setup_runtime', return_value=(credentials, runtime / 'configuration')), \
+                patch.object(B.subprocess, 'run') as check, patch.object(B.os, 'execve') as execute:
             boot.exec_runtime({'credentialDirectory': str(self.volume / 'etc/kura/credentials')}, [])
         command, argv, env = execute.call_args.args
-        self.assertEqual(command, '/usr/bin/java')
+        self.assertEqual(command, '/bin/setpriv')
+        options = ['/bin/setpriv', '--no-new-privs', '--bounding-set=-all', '--inh-caps=-all',
+                   '--ambient-caps=-all', '--regid=122', '--reuid=122', '--clear-groups']
+        self.assertEqual(argv[:len(options) + 1], [*options, '/usr/bin/java'])
+        self.assertEqual(check.call_args.args[0][:len(options)], options)
+        self.assertEqual(env['CREDENTIALS_DIRECTORY'], str(credentials))
+        self.assertFalse(any(arg.startswith('-Dosgi.console') for arg in argv))
         self.assertNotIn('KURA_CRYPTO_SECRET_KEY', env)
         self.assertNotIn(P.PROPERTY, ' '.join(argv))
         self.assertIn('-Dkura.custom.configuration=file:' + str(self.home / 'user/kura_custom.properties'), argv)
         self.assertIn('-Dkura.home=' + str(self.home), argv)
         self.assertIn('-Dkura.device.name=Test Device', argv)
         self.assertEqual(env['PERSISTENT_DIR'], str(self.volume))
+
+    def test_runtime_preflight_refuses_hardlinked_state_before_transfer(self):
+        boot = self.bootstrap()
+        boot.runtime_identity = (122, 122)
+        write(self.volume / 'data/original', b'retained')
+        os.link(self.volume / 'data/original', self.volume / 'data/alias')
+        with self.assertRaisesRegex(P.Refused, 'unreviewed type'):
+            boot.runtime_state_entries([self.volume / 'data'])
+
+    def test_privileged_keytool_does_not_inherit_jvm_option_sources(self):
+        boot = self.bootstrap({'JAVA_TOOL_OPTIONS': '-Xmx64m', 'JDK_JAVA_OPTIONS': '-Dexample=true'})
+        with patch.dict(os.environ, {'JAVA_TOOL_OPTIONS': '-Xmx64m', 'JDK_JAVA_OPTIONS': '-Dexample=true'}):
+            with patch.object(self, 'keytool', wraps=self.keytool) as tool:
+                boot.prepare(tool)
+        command = tool.call_args.args[0]
+        self.assertEqual(command[0], '/usr/bin/keytool')
+        self.assertFalse(set(tool.call_args.kwargs['env']) & set(B.OPTION_NAMES))
 
 
 if __name__ == '__main__':

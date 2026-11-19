@@ -64,7 +64,7 @@ RUN --mount=type=bind,source=.,target=/tmp/inputs,readonly set -eux; \
         false) \
             set -- /tmp/inputs/dps/*.dp; \
             test -f "$1"; \
-            install -m 0777 -d "${KURA_DIR}/kura/packages" "${KURA_DIR}/packages"; \
+            install -m 0755 -d "${KURA_DIR}/kura/packages" "${KURA_DIR}/packages"; \
             for dp; do \
                 cp "$dp" "${KURA_DIR}/kura/packages/"; \
                 dp-register "${KURA_DIR}/kura/packages/$(basename "$dp")"; \
@@ -84,6 +84,10 @@ RUN --mount=type=bind,source=.,target=/tmp/inputs,readonly set -eux; \
     chmod -R go-rwx /opt/eclipse; \
     chmod a+rx /opt/eclipse; \
     find /opt/eclipse -type d -exec chmod a+x {} +; \
+    for tree in bin framework log4j plugins share siblings; do \
+        chmod -R a+rX "${KURA_DIR}/$tree"; \
+    done; \
+    if [ -d "${KURA_DIR}/kura/packages" ]; then chmod -R a+rX "${KURA_DIR}/kura"; fi; \
     install -m 0700 -d "${KURA_DIR}/data"; \
     mkdir -p "${KURA_DIR}/packages"; \
     sed -i "s/\-printf '\%P.n'//g" /usr/local/bin/dp-install; \
@@ -108,7 +112,7 @@ RUN set -eux; \
     apk add --no-cache openjdk21-jre bash zip curl gcompat procps \
         unzip gzip tar dos2unix openssl net-tools which busybox-extras \
         chrony eudev glib psmisc socat shadow dpkg \
-        tzdata python3 py3-cryptography; \
+        tzdata python3 py3-cryptography setpriv; \
     useradd -M kura; passwd -l kura; \
     useradd -r -M kurad; passwd -l kurad; \
     \
@@ -122,12 +126,11 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /usr/local/share/kura /usr/local/share/kura
 
 RUN set -ex; \
-    chmod a+rx /usr/local/bin/* && \
-    ln -sf /bin/bash /usr/bin/bash && \
-    chmod a+rwx /var/log
+    chmod a+rx /usr/local/bin/*; \
+    ln -sf /bin/bash /usr/bin/bash
 
 EXPOSE 80 443
 
 VOLUME ["/load", "/var/lib/kura"]
 
-ENTRYPOINT ["/usr/local/bin/kura-entry-point"]
+ENTRYPOINT ["/usr/bin/python3", "-I", "-B", "/usr/local/bin/kura-container-bootstrap.py", "run"]
