@@ -508,8 +508,8 @@ class Bootstrap:
         with staged_file(RUNTIME) as (stage, output):
             output.write(self.store.key(canonical / self.policy.CREDENTIAL))
             output.flush()
-            os.fchown(output.fileno(), uid, gid)
             os.fchmod(output.fileno(), 0o400)
+            os.fchown(output.fileno(), uid, gid)
             stage.replace(credentials / self.policy.CREDENTIAL)
         configuration = RUNTIME / "configuration"
         self.mutable_directory(configuration)
