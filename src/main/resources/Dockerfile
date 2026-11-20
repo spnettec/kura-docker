@@ -128,7 +128,10 @@ COPY --from=builder /usr/local/share/kura /usr/local/share/kura
 
 RUN set -ex; \
     chmod a+rx /usr/local/bin/*; \
-    ln -sf /bin/bash /usr/bin/bash
+    ln -sf /bin/bash /usr/bin/bash; \
+    # Retained Kura snapshots use these paths. Log4j rotates files in the private directory. \
+    ln -s kura/kura.log /var/log/kura.log; \
+    ln -s kura/kura-audit.log /var/log/kura-audit.log
 
 EXPOSE 80 443
 
