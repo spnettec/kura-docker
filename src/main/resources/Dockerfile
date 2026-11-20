@@ -72,7 +72,9 @@ RUN --mount=type=bind,source=.,target=/tmp/inputs,readonly set -eux; \
         *) exit 1 ;; \
     esac; \
     \
-    # Configure fileinstall
+    # Start FileInstall in the container so it watches the mounted bundle directory.
+    set -- "${KURA_DIR}"/plugins/6/org.apache.felix.fileinstall-*.jar; \
+    test "$#" = 1; test -f "$1"; mv "$1" "${KURA_DIR}/plugins/6s/"; \
     add-config-ini "felix.fileinstall.disableNio2=true"; \
     add-config-ini "felix.fileinstall.dir=/load"; \
     \
