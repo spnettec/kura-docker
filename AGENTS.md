@@ -80,3 +80,16 @@ This project is indexed by **codebase-memory-mcp**. Always use it BEFORE grep/fi
 `list_projects` → `get_graph_schema` → `search_graph` → `get_code_snippet`
 
 > If the repository hasn't been indexed yet, run: `codebase-memory-mcp cli index_repository '{"repo_path": "/path/to/repo"}'`
+
+### Stopped-volume recovery for a legacy PKCS12 password change
+
+Older filesystem keystore providers published two private names for one encrypted recovery record using a hard link. A container interrupted at that point refuses normal startup. Use the maintenance image containing both the updated launcher and keystore provider, with the original stopped volume mounted at its original destination. Take the root device and inode, OSGi keystore PID, exact configured absolute keystore path and SHA-256 of the encrypted record from the same installation. The command acquires its existing instance lock and runs the provider as kurad.
+
+```sh
+docker run --rm --network none --read-only --tmpfs /tmp --tmpfs /load \
+  --mount "type=volume,volume-nocopy,source=$original_volume,target=/var/lib/kura" \
+  --entrypoint /usr/bin/python3 "$maintenance_image" -IB /usr/local/bin/kura-container-bootstrap.py \
+  separate-keystore-links "$root_device_inode" "$keystore_pid" "$configured_store_path" "$record_sha256"
+```
+
+After a successful return, start the original instance normally. If publication was interrupted, use the same four inputs again. The provider verifies the original file identity and the two records before changing their link layout. Ordinary Main completes the pending configuration update and retires the records.

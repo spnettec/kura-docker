@@ -529,15 +529,48 @@ class Bootstrap:
         sync_directory(configuration)
         return credentials, configuration
 
+    def runtime_command(self):
+        uid, gid = self.runtime_identity
+        return ["/bin/setpriv", "--no-new-privs", "--bounding-set=-all", "--inh-caps=-all",
+                    "--ambient-caps=-all", "--regid=" + str(gid), "--reuid=" + str(uid), "--clear-groups"]
+
+    def separate_keystore_links(self, root_id, pid, configured, digest):
+        path = Path(configured)
+        self.require(path.is_absolute() and str(path) == configured and ".." not in path.parts and pid
+                     and re.fullmatch(r"[a-f0-9]{64}", digest), "Invalid stopped-instance maintenance input")
+        root = self.root.lstat()
+        self.require(stat.S_ISDIR(root.st_mode) and root_id == f"{root.st_dev}:{root.st_ino}",
+                     "Different persistent root")
+        # The maintenance container can have pristine factory directories where ordinary startup
+        # creates its data aliases. Preserve the configured spelling for the provider fingerprint.
+        origin = next((base for base in (self.root, self.home, self.home.resolve(strict=True))
+                       if base in path.parents), None)
+        self.require(origin is not None, "Keystore lies outside container state")
+        relative = path.relative_to(origin)
+        self.require(len(relative.parts) >= 2 and relative.parts[0] in STATE_DIRECTORIES, "Invalid state path")
+        for lock in (".provision.lock", ".instance.lock"):
+            self.require((self.marker.parent / lock).exists(), "Existing instance locks required")
+        with self.instance_locked():
+            current = self.root.lstat()
+            self.require((root.st_dev, root.st_ino) == (current.st_dev, current.st_ino),
+                         "Persistent root changed before maintenance")
+            key = self.store.key(self.store.path(self.policy.KEY_PATH))
+            marker = json.loads(self.store.read(self.marker, private=True))
+            self.require(marker == {"schema": 1, "keySha256": hashlib.sha256(key).hexdigest()},
+                         "Unpaired container bootstrap marker")
+            bundles = list((self.home / "plugins/4s").glob("org.eclipse.kura.core.keystore-*.jar"))
+            self.require(len(bundles) == 1, "Container requires one keystore provider")
+            subprocess.run([*self.runtime_command(), "/usr/bin/java", "-cp", str(bundles[0]),
+                            "org.eclipse.kura.core.keystore.ContainerKeystoreRecovery", str(self.root), pid,
+                            configured, str(self.root / relative), digest], env=ROOT_TOOL_ENV, check=True)
+
     def exec_runtime(self, result, arguments):
         credentials, configuration = self.setup_runtime(Path(result["credentialDirectory"]))
         environment = dict(self.env, CREDENTIALS_DIRECTORY=str(credentials),
                            PERSISTENT_DIR=str(self.root), KURA_DIR=str(self.home))
         environment.pop("KURA_CRYPTO_SECRET_KEY", None)
         environment.update(self.sanitized)
-        uid, gid = self.runtime_identity
-        identity = ["/bin/setpriv", "--no-new-privs", "--bounding-set=-all", "--inh-caps=-all",
-                    "--ambient-caps=-all", "--regid=" + str(gid), "--reuid=" + str(uid), "--clear-groups"]
+        identity = self.runtime_command()
         subprocess.run([*identity, "/usr/bin/python3", "-I", "-B", str(self.home / "bin/kura_key_store.py"),
                         "check-loaded"], env=ROOT_TOOL_ENV | {"CREDENTIALS_DIRECTORY": str(credentials)}, check=True)
         launchers = list((self.home / "plugins").rglob("org.eclipse.equinox.launcher-*.jar"))
@@ -568,14 +601,16 @@ def main(arguments):
         if arguments == ["inventory"]:
             inventory(home)
             return 0
-        if not arguments or arguments[0] not in ("prepare", "run") or os.geteuid() != 0:
+        if not arguments or arguments[0] not in ("prepare", "run", "separate-keystore-links") or os.geteuid() != 0:
             raise RuntimeError("Unsupported container bootstrap invocation")
         runtime = pwd.getpwnam("kurad")
         if min(runtime.pw_uid, runtime.pw_gid) <= 0:
             raise RuntimeError("Unsafe container runtime identity")
         bootstrap = Bootstrap(home, Path(os.environ.get("PERSISTENT_DIR") or "/var/lib/kura"),
                               runtime_identity=(runtime.pw_uid, runtime.pw_gid))
-        if arguments[0] == "prepare":
+        if arguments[0] == "separate-keystore-links":
+            bootstrap.separate_keystore_links(*arguments[1:])
+        elif arguments[0] == "prepare":
             bootstrap.prepare()
             print("Kura container credentials and persistent state are ready.")
         else:

@@ -330,6 +330,35 @@ class ContainerCredentials(unittest.TestCase):
         self.assertEqual(existing.stat().st_ino, inode)
         self.assertEqual(list(runtime.glob('.kura-stage-*')), [])
 
+    def test_link_maintenance_needs_the_existing_stopped_volume_and_drops_privileges(self):
+        boot = self.bootstrap({'JAVA_TOOL_OPTIONS': '-Dtest=true'})
+        boot.runtime_identity = (122, 122)
+        info = self.volume.stat()
+        root_id = f"{info.st_dev}:{info.st_ino}"
+        configured = str(self.home / "data/business.p12")
+        args = [root_id, "business", configured, "a" * 64]
+        with self.assertRaises(P.Refused):
+            boot.separate_keystore_links(*args)
+        self.assertEqual(list(self.volume.iterdir()), [])
+        self.prepare()
+        before = file_state(self.volume)
+        write(self.home / "plugins/4s/org.eclipse.kura.core.keystore-test.jar", b"provider")
+        with patch.object(B.subprocess, "run") as worker:
+            with self.assertRaises(P.Refused):
+                boot.separate_keystore_links("0:0", *args[1:])
+            with boot.instance_locked(), self.assertRaises(BlockingIOError):
+                boot.separate_keystore_links(*args)
+            worker.assert_not_called()
+            boot.separate_keystore_links(*args)
+        argv = worker.call_args.args[0]
+        self.assertIn("--no-new-privs", argv)
+        self.assertIn("--reuid=122", argv)
+        self.assertIn("--bounding-set=-all", argv)
+        self.assertEqual(argv[-5:], [str(self.volume), "business", configured,
+                                    str(self.volume / "data/business.p12"), "a" * 64])
+        self.assertEqual(worker.call_args.kwargs["env"], B.ROOT_TOOL_ENV)
+        self.assert_retained(before)
+
     def test_runtime_preflight_refuses_hardlinked_state_before_transfer(self):
         boot = self.bootstrap()
         boot.runtime_identity = (122, 122)
