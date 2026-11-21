@@ -145,6 +145,10 @@ def properties_values(raw):
     return values
 
 
+class InstanceInUse(BlockingIOError):
+    """Another launcher or maintenance process holds the persistent volume lock."""
+
+
 class Bootstrap:
     def __init__(self, home, persistent, environ=None, factory=None, policy=None, runtime_identity=None):
         self.home = Path(home).absolute()
@@ -403,7 +407,10 @@ class Bootstrap:
                 self.require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
                              and metadata.st_uid == os.geteuid() and not metadata.st_mode & 0o077,
                              "Unsafe container instance lock")
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as error:
+                    raise InstanceInUse(*error.args) from error
             except BaseException:
                 os.close(fd)
                 raise
@@ -617,6 +624,9 @@ def main(arguments):
         else:
             bootstrap.run(arguments[1:])
         return 0
+    except InstanceInUse:
+        print("Kura persistent volume is in use by another instance or maintenance operation.", file=sys.stderr)
+        return 1
     except Exception:
         # Never log options, key values, protected plaintext, or keytool command output.
         print("Kura container bootstrap refused; preserve existing keys/data and reconcile the migration source.",

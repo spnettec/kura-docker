@@ -251,7 +251,7 @@ class ContainerCredentials(unittest.TestCase):
         self.prepare()
         before = file_state(self.volume)
         with self.bootstrap().instance_locked():
-            with self.assertRaises(BlockingIOError):
+            with self.assertRaises(B.InstanceInUse):
                 self.prepare()
         self.assert_retained(before)
 
