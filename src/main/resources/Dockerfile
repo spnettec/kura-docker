@@ -1,13 +1,18 @@
-# ============================================================
-# Stage 1: Builder — extract .debs and run Docker-specific setup
-# Debian inputs are mounted read-only without a large COPY cache layer.
-# ============================================================
+# Optional archives are isolated from the deb assembly cache key. A build
+# with DPs disabled also works with no dps directory in the Maven context.
+FROM alpine:latest AS optional-dps
+ARG KURA_SKIP_DPS=false
+RUN --mount=type=bind,target=/inputs,readonly set -eu; \
+    mkdir /dps; \
+    case "$KURA_SKIP_DPS" in \
+        true) ;; \
+        false) cp /inputs/dps/*.dp /dps/ ;; \
+        *) exit 1 ;; \
+    esac
+
 FROM alpine:latest AS builder
-
-# RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
-
-# Copy ALL build context into builder (debs, scripts, configs)
-COPY bin/ /usr/local/bin/
+RUN apk add --no-cache bash shadow dpkg python3
+COPY --chmod=0755 bin/add-config-ini bin/dp-register bin/dp-extract-name /usr/local/bin/
 COPY docker-setup.sh /tmp/
 COPY log4j/log4j.xml /tmp/log4j.xml
 COPY snapshots/snapshot_0.xml /tmp/snapshot_0.xml
@@ -16,10 +21,9 @@ ENV KURA_DIR=/opt/eclipse/kura
 ARG TARGETARCH
 ARG KURA_SKIP_DPS=false
 
-RUN --mount=type=bind,source=.,target=/tmp/inputs,readonly set -eux; \
-    apk add --no-cache openjdk21-jre bash shadow dpkg openssl gcompat python3; \
-    \
-    chmod a+x -R /usr/local/bin; \
+RUN --mount=type=bind,source=debs,target=/tmp/inputs/debs,readonly \
+    --mount=type=bind,from=optional-dps,source=/dps,target=/tmp/inputs/dps,readonly \
+    set -eux; \
     ln -s /bin/bash /usr/bin/bash; \
     \
     # The Debian inputs must match their package names and target ABI.
@@ -91,9 +95,11 @@ RUN --mount=type=bind,source=.,target=/tmp/inputs,readonly set -eux; \
     done; \
     if [ -d "${KURA_DIR}/kura/packages" ]; then chmod -R a+rX "${KURA_DIR}/kura"; fi; \
     install -m 0700 -d "${KURA_DIR}/data"; \
-    mkdir -p "${KURA_DIR}/packages"; \
-    sed -i "s/\-printf '\%P.n'//g" /usr/local/bin/dp-install; \
-    python3 -I /usr/local/bin/kura-container-bootstrap.py inventory
+    mkdir -p "${KURA_DIR}/packages"
+
+FROM builder AS inventory
+RUN --mount=type=bind,source=bin/kura-container-bootstrap.py,target=/tmp/bootstrap.py,readonly \
+    python3 -I /tmp/bootstrap.py inventory
 
 # ============================================================
 # Stage 2: Final — slim runtime image
@@ -125,8 +131,8 @@ RUN set -eux; \
 # Copy installed files from builder (NO .deb files!)
 # Keep package ownership. The privileged bootstrap only loads paired Root code.
 COPY --from=builder /opt/eclipse /opt/eclipse
-COPY --from=builder /usr/local/bin /usr/local/bin
-COPY --from=builder /usr/local/share/kura /usr/local/share/kura
+COPY bin/ /usr/local/bin/
+COPY --from=inventory /usr/local/share/kura /usr/local/share/kura
 
 RUN set -ex; \
     chmod a+rx /usr/local/bin/*; \
