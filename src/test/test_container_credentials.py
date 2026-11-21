@@ -357,6 +357,7 @@ class ContainerCredentials(unittest.TestCase):
         self.assertEqual(argv[-5:], [str(self.volume), "business", configured,
                                     str(self.volume / "data/business.p12"), "a" * 64])
         self.assertEqual(worker.call_args.kwargs["env"], B.ROOT_TOOL_ENV)
+        self.assertEqual(len(worker.call_args.kwargs["pass_fds"]), 1)
         self.assert_retained(before)
 
     def test_runtime_preflight_refuses_hardlinked_state_before_transfer(self):

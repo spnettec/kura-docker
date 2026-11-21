@@ -550,7 +550,7 @@ class Bootstrap:
         self.require(len(relative.parts) >= 2 and relative.parts[0] in STATE_DIRECTORIES, "Invalid state path")
         for lock in (".provision.lock", ".instance.lock"):
             self.require((self.marker.parent / lock).exists(), "Existing instance locks required")
-        with self.instance_locked():
+        with self.instance_locked() as instance_lock:
             current = self.root.lstat()
             self.require((root.st_dev, root.st_ino) == (current.st_dev, current.st_ino),
                          "Persistent root changed before maintenance")
@@ -562,7 +562,8 @@ class Bootstrap:
             self.require(len(bundles) == 1, "Container requires one keystore provider")
             subprocess.run([*self.runtime_command(), "/usr/bin/java", "-cp", str(bundles[0]),
                             "org.eclipse.kura.core.keystore.ContainerKeystoreRecovery", str(self.root), pid,
-                            configured, str(self.root / relative), digest], env=ROOT_TOOL_ENV, check=True)
+                            configured, str(self.root / relative), digest], env=ROOT_TOOL_ENV, check=True,
+                           pass_fds=(instance_lock,))
 
     def exec_runtime(self, result, arguments):
         credentials, configuration = self.setup_runtime(Path(result["credentialDirectory"]))
