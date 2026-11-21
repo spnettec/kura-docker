@@ -2,11 +2,21 @@
 # with DPs disabled also works with no dps directory in the Maven context.
 FROM alpine:latest AS optional-dps
 ARG KURA_SKIP_DPS=false
+ARG KURA_DP_FILES
 RUN --mount=type=bind,target=/inputs,readonly set -eu; \
     mkdir /dps; \
     case "$KURA_SKIP_DPS" in \
         true) ;; \
-        false) cp /inputs/dps/*.dp /dps/ ;; \
+        false) \
+            if [ -n "${KURA_DP_FILES:-}" ]; then \
+                set -f; \
+                for name in $KURA_DP_FILES; do \
+                    case "$name" in */*) exit 1 ;; *.dp) ;; *) exit 1 ;; esac; \
+                    cp "/inputs/dps/$name" /dps/; \
+                done; \
+            else \
+                cp /inputs/dps/*.dp /dps/; \
+            fi ;; \
         *) exit 1 ;; \
     esac
 
