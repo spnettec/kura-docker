@@ -514,12 +514,19 @@ class Bootstrap:
         configuration = RUNTIME / "configuration"
         self.mutable_directory(configuration)
         with staged_file(RUNTIME) as (stage, output):
-            subprocess.run([str(self.home / "bin/gen_config_ini.sh"), str(self.home / "framework/config.ini"),
+            # The installed loader appends the bundle list. Read the template here
+            # so its final echo cannot mask a failed template read.
+            with (self.home / "framework/config.ini").open("rb") as template:
+                shutil.copyfileobj(template, output)
+            output.flush()
+            subprocess.run([str(self.home / "bin/gen_config_ini.sh"), os.devnull,
                             str(self.home / "plugins"), str(self.home / "siblings")],
                            stdout=output, env=ROOT_TOOL_ENV, check=True)
             os.fchown(output.fileno(), uid, gid)
+            os.fsync(output.fileno())
             stage.replace(configuration / "config.ini")
         os.chown(configuration, uid, gid, follow_symlinks=False)
+        sync_directory(configuration)
         return credentials, configuration
 
     def exec_runtime(self, result, arguments):

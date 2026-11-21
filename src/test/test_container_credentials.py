@@ -312,6 +312,24 @@ class ContainerCredentials(unittest.TestCase):
         self.assertIn('-Dkura.device.name=Test Device', argv)
         self.assertEqual(env['PERSISTENT_DIR'], str(self.volume))
 
+    def test_unreadable_equinox_template_preserves_existing_configuration(self):
+        boot = self.bootstrap()
+        boot.runtime_identity = (os.getuid(), os.getgid())
+        runtime = self.base / 'run'
+        canonical = self.base / 'canonical'
+        write(canonical / P.CREDENTIAL, secrets.token_bytes(32))
+        existing = runtime / 'configuration/config.ini'
+        write(existing, b'previous configuration')
+        inode = existing.stat().st_ino
+        (self.home / 'framework/config.ini').mkdir(parents=True)
+        with patch.object(B, 'RUNTIME', runtime), patch.object(B.subprocess, 'run') as loader:
+            with self.assertRaises(IsADirectoryError):
+                boot.setup_runtime(canonical)
+        loader.assert_not_called()
+        self.assertEqual(existing.read_bytes(), b'previous configuration')
+        self.assertEqual(existing.stat().st_ino, inode)
+        self.assertEqual(list(runtime.glob('.kura-stage-*')), [])
+
     def test_runtime_preflight_refuses_hardlinked_state_before_transfer(self):
         boot = self.bootstrap()
         boot.runtime_identity = (122, 122)
