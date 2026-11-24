@@ -423,6 +423,36 @@ class Bootstrap:
         with self.instance_locked():
             return self.prepare_locked(keytool)
 
+    def provision_https_keystore(self, path, keytool):
+        self.store.private_dir(path.parent)
+        # Keep uncommitted keytool output outside the mutable state inventory.
+        # The instance lock serializes publication into this Root-owned directory.
+        with tempfile.TemporaryDirectory(prefix=".tls-", dir=self.marker.parent) as temporary:
+            generated = Path(temporary) / "httpskeystore.ks"
+            command = ["/usr/bin/keytool", "-J-Dfile.encoding=UTF-8", "-genkeypair", "-alias", "localhost",
+                       "-keyalg", "RSA", "-keysize", "2048", "-storetype", "PKCS12",
+                       "-keystore", str(generated), "-dname",
+                       "CN=YOFC, OU=信息技术部, O=长飞光纤光缆股份有限公司, L=武汉, S=湖北, C=中国",
+                       "-ext", "ku=digitalSignature,keyEncipherment", "-ext", "eku=serverAuth",
+                       "-validity", "1000", "-storepass", "changeit", "-keypass", "changeit"]
+            result = keytool(command, capture_output=True, env=ROOT_TOOL_ENV)
+            self.require(result.returncode == 0, "Container HTTPS keystore generation failed")
+            fd = os.open(generated, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            try:
+                info = os.fstat(fd)
+                self.require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                             and info.st_uid == self.store.owner and 0 < info.st_size <= MAX_STATE_BYTES,
+                             "Unsafe generated HTTPS keystore")
+                os.fchmod(fd, 0o600)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            self.store.private_dir(path.parent)
+            self.require(not os.path.lexists(path), "Container HTTPS keystore appeared during provisioning")
+            generated.replace(path)
+            sync_directory(path.parent)
+            sync_directory(Path(temporary))
+
     def prepare_locked(self, keytool=subprocess.run):
         with self.store.locked():
             files = self.state_files()
@@ -477,18 +507,7 @@ class Bootstrap:
             self.merge_and_alias(files)
             tls = self.root / TLS_NAME
             if not tls.exists():
-                self.store.private_dir(tls.parent)
-                with tempfile.TemporaryDirectory(prefix=".tls-", dir=tls.parent) as temporary:
-                    generated = Path(temporary) / "httpskeystore.ks"
-                    command = ["/usr/bin/keytool", "-J-Dfile.encoding=UTF-8", "-genkeypair", "-alias", "localhost",
-                               "-keyalg", "RSA", "-keysize", "2048", "-storetype", "PKCS12",
-                               "-keystore", str(generated), "-dname",
-                               "CN=YOFC, OU=信息技术部, O=长飞光纤光缆股份有限公司, L=武汉, S=湖北, C=中国",
-                               "-ext", "ku=digitalSignature,keyEncipherment", "-ext", "eku=serverAuth",
-                               "-validity", "1000", "-storepass", "changeit", "-keypass", "changeit"]
-                    result = keytool(command, capture_output=True, env=ROOT_TOOL_ENV)
-                    self.require(result.returncode == 0, "Container HTTPS keystore generation failed")
-                    self.store.publish(tls, generated.read_bytes(), 0o600)
+                self.provision_https_keystore(tls, keytool)
             if marker is None:
                 marker = dict(schema=1, keySha256=hashlib.sha256(value).hexdigest())
                 self.store.publish(self.marker, (json.dumps(marker, sort_keys=True) + "\n").encode(), 0o600)

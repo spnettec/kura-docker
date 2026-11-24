@@ -112,6 +112,50 @@ class ContainerCredentials(unittest.TestCase):
         self.assertEqual((self.home / 'user/kura_custom.properties').read_bytes(), b'kura.snapshots.encrypt=false\n')
         self.assertTrue((self.home / 'user').resolve() == (self.volume / 'user').resolve())
 
+    def test_interrupted_keytool_output_does_not_block_fresh_volume_resume(self):
+        child = os.fork()
+        if child == 0:
+            def interrupted_keytool(args, **kwargs):
+                self.keytool(args, **kwargs)
+                os._exit(92)
+
+            try:
+                self.bootstrap().prepare(interrupted_keytool)
+            finally:
+                os._exit(93)
+        _, status = os.waitpid(child, 0)
+        self.assertEqual(os.waitstatus_to_exitcode(status), 92)
+        boot = self.bootstrap()
+        key = boot.store.path(P.KEY_PATH)
+        receipt = boot.store.path(P.RECEIPT_PATH)
+        previous = {path: (path.stat().st_ino, path.read_bytes()) for path in (key, receipt)}
+        self.assertFalse((self.volume / B.TLS_NAME).exists())
+        self.assertFalse(boot.marker.exists())
+        boot.prepare(self.keytool)
+        self.assertTrue(boot.marker.exists())
+        self.assertTrue((self.volume / B.TLS_NAME).exists())
+        for path, fingerprint in previous.items():
+            self.assertEqual((path.stat().st_ino, path.read_bytes()), fingerprint)
+
+    def test_restart_after_https_publication_reuses_the_published_keystore(self):
+        tls = self.volume / B.TLS_NAME
+        original_sync = B.sync_directory
+
+        def interrupted_sync(directory):
+            if directory == tls.parent:
+                raise OSError('stopped after HTTPS keystore publication')
+            original_sync(directory)
+
+        with patch.object(B, 'sync_directory', side_effect=interrupted_sync):
+            with self.assertRaisesRegex(OSError, 'stopped after HTTPS'):
+                self.prepare()
+        self.assertFalse(self.bootstrap().marker.exists())
+        fingerprint = (tls.stat().st_ino, tls.stat().st_nlink, tls.read_bytes())
+        self.assertEqual(fingerprint[1], 1)
+        self.prepare()
+        self.assertEqual((tls.stat().st_ino, tls.stat().st_nlink, tls.read_bytes()), fingerprint)
+        self.assertEqual(self.keytool_calls, 1)
+
     def test_two_instances_have_distinct_master_and_tls_keys(self):
         self.prepare()
         home, volume = self.base / 'home2', self.base / 'volume2'
