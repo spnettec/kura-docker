@@ -113,3 +113,33 @@ a site configuration readable by `kurad`, mounted at
 `/etc/kura-pkcs11/softhsm2-file.conf`. Keep the token directory on the
 persistent volume and continue using the same slot and credential. Stop the
 old container before starting a replacement against the original volume.
+
+### Move an existing Alpine SoftHSM file store
+
+The tested ARM64 transition uses the Alpine `softhsm` package 2.7.0-r0,
+the optional file-token module, and a Compose service with one existing
+external volume mounted at `/var/lib/kura`. The two libraries have different
+paths. Use a stopped backup of the original volume, and keep the original
+image and configuration snapshots available.
+
+1. Build the optional module on top of the exact image that contains the
+   distribution SoftHSM package. This transitional image has libraries at
+   both `/usr/lib/softhsm/libsofthsm2.so` and
+   `/usr/lib/kura-pkcs11/softhsm2/libsofthsm2.so`. Keep the same site file
+   and token directory. For the transition, set `SOFTHSM2_CONF` to the
+   existing readable site file so both versions resolve the same store.
+2. Stop the service before recreating it with the transitional image and the
+   same named volume. Verify a signature from each configured slot with the
+   original certificate. Change only `library.path` on the PKCS#11 component
+   configurations to the optional module path. Preserve the new configuration
+   snapshot and verify signatures again with the same certificates.
+3. Stop the transitional service and recreate it with the optional-only image
+   on the same volume. Verify the saved configuration and signatures after
+   startup. Keep the volume when recreating the service.
+4. To go back, stop the service and recreate it with the transitional image.
+   Set the existing components' `library.path` back to the distribution path,
+   save the configuration, and verify signatures before returning to the
+   original image. Verify them again after it starts.
+
+This procedure was exercised with Linux file storage and two RSA signing slots.
+It preserves the PINs and slot bindings. Each image change is a service restart.
