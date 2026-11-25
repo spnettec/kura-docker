@@ -39,6 +39,8 @@ RUN --mount=type=bind,source=debs,target=/tmp/inputs/debs,readonly \
     # The Debian inputs must match their package names and target ABI.
     case "$TARGETARCH" in arm64|amd64) ;; *) exit 1 ;; esac; \
     mkdir -p /usr/local/share/kura; \
+    api2=0; \
+    if dpkg-deb -f /tmp/inputs/debs/kura-core.deb Provides | grep -Eq '(^|,[[:space:]]*)kura-core-osgi-api2([[:space:]]*,|$)'; then api2=1; fi; \
     for name in kura-core kura-management-ui kura-deployment kura-wires; do \
         deb="/tmp/inputs/debs/$name.deb"; \
         test "$(dpkg-deb -f "$deb" Package)" = "$name"; \
@@ -47,6 +49,9 @@ RUN --mount=type=bind,source=debs,target=/tmp/inputs/debs,readonly \
             test "$architecture" = "$TARGETARCH"; \
         else \
             test "$architecture" = all || test "$architecture" = "$TARGETARCH"; \
+            sibling_api2=0; \
+            if dpkg-deb -f "$deb" Pre-Depends | grep -Eq '(^|,[[:space:]]*)kura-core-osgi-api2([[:space:]]*,|$)'; then sibling_api2=1; fi; \
+            if [ "$api2" != "$sibling_api2" ]; then echo "$name has a different Kura OSGi API generation from Core" >&2; exit 1; fi; \
         fi; \
         printf '%s\t%s\t%s\t%s\n' "$name" "$(dpkg-deb -f "$deb" Version)" "$architecture" \
             "$(sha256sum "$deb" | cut -d ' ' -f 1)" >> /usr/local/share/kura/package-inputs.tsv; \
@@ -71,6 +76,13 @@ RUN --mount=type=bind,source=debs,target=/tmp/inputs/debs,readonly \
     \
     # Register siblings
     printf '%s\n' management-ui deployment wires >> "${KURA_DIR}/framework/sibling-install-order"; \
+    \
+    # dpkg extraction does not run the Debian dependency or startup gates.
+    if [ "$api2" = 1 ]; then \
+        "$KURA_DIR/bin/gen_config_ini.sh" /dev/null "$KURA_DIR/plugins" "$KURA_DIR/siblings" > /tmp/kura-api-bundles; \
+        python3 -I -B "$KURA_DIR/bin/kura_framework_config.py" --check-api "$KURA_DIR" < /tmp/kura-api-bundles; \
+        rm /tmp/kura-api-bundles; \
+    fi; \
     \
     # Install YOFC .dp deployment packages
     case "$KURA_SKIP_DPS" in \
