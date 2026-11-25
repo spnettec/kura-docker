@@ -93,3 +93,23 @@ docker run --rm --network none --read-only --tmpfs /tmp --tmpfs /load \
 ```
 
 After a successful return, start the original instance normally. If publication was interrupted, use the same four inputs again. The provider verifies the original file identity and the two records before changing their link layout. Ordinary Main completes the pending configuration update and retires the records.
+
+## Optional SoftHSM file-token image
+
+Build the regular Alpine Kura image first. Then build the opt-in image using
+the SoftHSM source module from the matching Core Git checkout.
+
+```bash
+docker buildx build --platform linux/arm64 --load \
+  --build-arg KURA_RUNTIME_IMAGE=kura-alpine:latest \
+  --build-context "softhsm-source=$CORE_REPO/kura/distrib/kura-softhsm2-file" \
+  -f src/main/resources/Dockerfile.softhsm -t kura-alpine:softhsm-file src/main/resources
+```
+
+The image builds and tests a musl module from Core's verified source archive.
+It inherits the regular entrypoint and mounts. Set the PKCS#11 keystore's
+`library.path` to `/usr/lib/kura-pkcs11/softhsm2/libsofthsm2.so` and supply
+a site configuration readable by `kurad`, mounted at
+`/etc/kura-pkcs11/softhsm2-file.conf`. Keep the token directory on the
+persistent volume and continue using the same slot and credential. Stop the
+old container before starting a replacement against the original volume.

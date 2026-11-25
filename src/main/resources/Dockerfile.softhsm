@@ -1,0 +1,17 @@
+ARG KURA_RUNTIME_IMAGE=kura-alpine:latest
+FROM ${KURA_RUNTIME_IMAGE} AS softhsm-build
+RUN apk add --no-cache build-base cmake cppunit-dev git openssl-dev
+RUN --mount=type=bind,from=softhsm-source,target=/src/softhsm,readonly \
+    set -eu; \
+    mkdir /work; \
+    sh /src/softhsm/build-native.sh /work; \
+    libdir=/module/usr/lib/kura-pkcs11/softhsm2; \
+    docdir=/module/usr/share/doc/kura-softhsm2-file; \
+    install -d -m 0755 "$libdir" "$docdir"; \
+    install -m 0644 /work/build/src/lib/libsofthsm2.so "$libdir/"; \
+    install -m 0644 /work/SoftHSMv2-2.6.1/LICENSE "$docdir/copyright"; \
+    install -m 0644 /src/softhsm/README.md /work/build-origin "$docdir/"
+
+FROM ${KURA_RUNTIME_IMAGE}
+COPY --from=softhsm-build /module/ /
+RUN ldd /usr/lib/kura-pkcs11/softhsm2/libsofthsm2.so
